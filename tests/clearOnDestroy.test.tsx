@@ -65,6 +65,40 @@ describe('Form.clearOnDestroy', () => {
 });
 
 describe('clearOnDestroy initialization across mount replay', () => {
+  it('does not rerender unchanged named fields or report initialization changes on ordinary mount', () => {
+    let formCache: FormInstance;
+    const onRender = jest.fn();
+    const onValuesChange = jest.fn();
+    const onFieldsChange = jest.fn();
+    const TrackedInput = (props: React.ComponentProps<typeof Input>) => {
+      onRender();
+      return <Input {...props} />;
+    };
+    const Demo = () => {
+      const [form] = Form.useForm();
+      formCache = form;
+      return (
+        <Form
+          form={form}
+          initialValues={{ count: '1' }}
+          clearOnDestroy
+          onValuesChange={onValuesChange}
+          onFieldsChange={onFieldsChange}
+        >
+          <Field name="count">
+            <TrackedInput />
+          </Field>
+        </Form>
+      );
+    };
+    const { container } = render(<Demo />);
+    expect(onRender).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('input').value).toBe('1');
+    expect(formCache.isFieldsTouched()).toBe(false);
+    expect(onValuesChange).not.toHaveBeenCalled();
+    expect(onFieldsChange).not.toHaveBeenCalled();
+  });
+
   const Activity = (
     React as {
       Activity?: React.ComponentType<{
@@ -73,6 +107,102 @@ describe('clearOnDestroy initialization across mount replay', () => {
       }>;
     }
   ).Activity;
+
+  (Activity ? it.each : it.skip.each)(['initialValue', 'metadata'])(
+    'restores saved values after %s updates while Activity is hidden',
+    update => {
+      let formCache: FormInstance;
+      const Demo = ({ mode, fresh = false }: { mode: 'hidden' | 'visible'; fresh?: boolean }) => {
+        const [form] = Form.useForm();
+        formCache = form;
+        return (
+          <Activity mode={mode}>
+            <Form form={form} initialValues={{ count: '1' }} clearOnDestroy>
+              <Field name="count">
+                <Input />
+              </Field>
+              {fresh && (
+                <Field name="fresh" initialValue="fresh-default">
+                  <Input />
+                </Field>
+              )}
+            </Form>
+          </Activity>
+        );
+      };
+      const { container, rerender, unmount } = render(<Demo mode="visible" />);
+      act(() => formCache.setFieldsValue({ preloaded: 'saved-preloaded' }));
+      fireEvent.change(container.querySelector('input'), { target: { value: 'edited' } });
+      rerender(<Demo mode="hidden" />);
+      expect(formCache.getFieldsValue(true)).toEqual({});
+      const fresh = update === 'initialValue';
+      if (fresh) {
+        rerender(<Demo mode="hidden" fresh />);
+        expect(formCache.getFieldsValue(true)).toEqual({ fresh: 'fresh-default' });
+      } else {
+        act(() => formCache.setFields([{ name: 'count', touched: false }]));
+        expect(formCache.getFieldsValue(true)).toEqual({});
+      }
+      rerender(<Demo mode="visible" fresh={fresh} />);
+      expect(formCache.getFieldsValue(true)).toEqual({
+        count: 'edited',
+        preloaded: 'saved-preloaded',
+        ...(fresh ? { fresh: 'fresh-default' } : {}),
+      });
+      expect(container.querySelector('input').value).toBe('edited');
+      unmount();
+      expect(formCache.getFieldsValue(true)).toEqual({});
+    },
+  );
+
+  (Activity ? it.each : it.skip.each)([
+    'setFieldsValue',
+    'setFieldValue',
+    'setFields',
+    'resetFields',
+  ])('keeps explicit %s changes made while Activity is hidden', operation => {
+    let formCache: FormInstance;
+    const Demo = ({ mode }: { mode: 'hidden' | 'visible' }) => {
+      const [form] = Form.useForm();
+      formCache = form;
+      return (
+        <Activity mode={mode}>
+          <Form form={form} initialValues={{ count: '1' }} clearOnDestroy>
+            <Field name="count">
+              <Input />
+            </Field>
+          </Form>
+        </Activity>
+      );
+    };
+    const { container, rerender, unmount } = render(<Demo mode="visible" />);
+    fireEvent.change(container.querySelector('input'), { target: { value: 'edited' } });
+    rerender(<Demo mode="hidden" />);
+    expect(formCache.getFieldsValue(true)).toEqual({});
+    const expected =
+      operation === 'resetFields'
+        ? { count: '1' }
+        : operation === 'setFieldsValue'
+          ? { count: 'external', extra: 'new' }
+          : { count: 'external' };
+    act(() => {
+      if (operation === 'setFieldsValue') {
+        formCache.setFieldsValue(expected);
+      } else if (operation === 'setFieldValue') {
+        formCache.setFieldValue('count', 'external');
+      } else if (operation === 'setFields') {
+        formCache.setFields([{ name: 'count', value: 'external' }]);
+      } else {
+        formCache.resetFields();
+      }
+    });
+    expect(formCache.getFieldsValue(true)).toEqual(expected);
+    rerender(<Demo mode="visible" />);
+    expect(formCache.getFieldsValue(true)).toEqual(expected);
+    expect(container.querySelector('input').value).toBe(expected.count);
+    unmount();
+    expect(formCache.getFieldsValue(true)).toEqual({});
+  });
 
   (Activity ? it : it.skip)(
     'uses clearOnDestroy at first visible mount after initially hidden rendering',
