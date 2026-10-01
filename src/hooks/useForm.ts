@@ -114,6 +114,7 @@ export class FormStore {
         useSubscribe: this.useSubscribe,
         setInitialValues: this.setInitialValues,
         destroyForm: this.destroyForm,
+        backupStore: this.backupStore,
         setCallbacks: this.setCallbacks,
         setValidateMessages: this.setValidateMessages,
         getFields: this.getFields,
@@ -171,6 +172,11 @@ export class FormStore {
       });
       this.prevWithoutPreserves = prevWithoutPreserves;
     }
+  };
+
+  private backupStore = () => {
+    const store = this.store;
+    return () => this.updateStore(store);
   };
 
   private getInitialValue = (namePath: InternalNamePath) => {
